@@ -15,6 +15,8 @@ func main() {
 		},
 	}
 
+	tbbCmd.AddCommand(versionCmd)
+
 	err := tbbCmd.Execute()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
