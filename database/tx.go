@@ -12,3 +12,11 @@ type Tx struct {
 func (t Tx) IsReward() bool {
 	return t.Data == "reward"
 }
+
+func NewAccount(value string) Account {
+	return Account(value)
+}
+
+func NewTx(from Account, to Account, value uint, data string) Tx {
+	return Tx{from, to, value, data}
+}
