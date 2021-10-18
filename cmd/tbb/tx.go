@@ -57,6 +57,12 @@ func txAddCmd() *cobra.Command {
 				os.Exit(1)
 			}
 
+			err = state.Persist()
+			if err != nil {
+				fmt.Fprintln(os.Stderr, err)
+				os.Exit(1)
+			}
+
 			fmt.Println("TX successfully added to the ledger")
 		},
 	}
@@ -67,7 +73,7 @@ func txAddCmd() *cobra.Command {
 	txCmd.Flags().String(flagTo, "", "To what account to send tokens")
 	txCmd.MarkFlagRequired(flagTo)
 
-	txCmd.Flags().String(flagValue, "", "How many tokens to send")
+	txCmd.Flags().Uint(flagValue, 0, "How many tokens to send")
 	txCmd.MarkFlagRequired(flagValue)
 
 	txCmd.Flags().String(flagData, "", "Possible values: 'reward'")
