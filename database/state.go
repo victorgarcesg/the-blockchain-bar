@@ -2,8 +2,10 @@ package database
 
 import (
 	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path/filepath"
 )
@@ -12,8 +14,11 @@ type State struct {
 	Balances  map[Account]uint
 	txMempool []Tx
 
-	dbFile *os.File
+	dbFile   *os.File
+	snapshot Snapshot
 }
+
+type Snapshot [32]byte
 
 func NewStateFromDisk() (*State, error) {
 	cwd, err := os.Getwd()
@@ -38,7 +43,7 @@ func NewStateFromDisk() (*State, error) {
 	}
 
 	scanner := bufio.NewScanner(f)
-	state := &State{balances, make([]Tx, 0), f}
+	state := &State{balances, make([]Tx, 0), f, Snapshot{}}
 
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
@@ -51,6 +56,11 @@ func NewStateFromDisk() (*State, error) {
 		if err := state.apply(tx); err != nil {
 			return nil, err
 		}
+	}
+
+	err = state.doSnapshot()
+	if err != nil {
+		return nil, err
 	}
 
 	return state, nil
@@ -66,24 +76,32 @@ func (s *State) Add(tx Tx) error {
 	return nil
 }
 
-func (s *State) Persist() error {
+func (s *State) Persist() (Snapshot, error) {
 	mempool := make([]Tx, len(s.txMempool))
 	copy(mempool, s.txMempool)
 
 	for i := 0; i < len(mempool); i++ {
 		txJson, err := json.Marshal(mempool[i])
 		if err != nil {
-			return err
+			return Snapshot{}, err
 		}
 
+		fmt.Println("Persisting new TX to disk:")
+		fmt.Printf("\t%s\n", txJson)
 		if _, err := s.dbFile.Write(append(txJson, '\n')); err != nil {
-			return err
+			return Snapshot{}, err
 		}
+
+		err = s.doSnapshot()
+		if err != nil {
+			return Snapshot{}, err
+		}
+		fmt.Printf("New DB Snapshot: %x\n", s.snapshot)
 
 		s.txMempool = s.txMempool[1:]
 	}
 
-	return nil
+	return s.snapshot, nil
 }
 
 func (s *State) Close() {
@@ -102,6 +120,25 @@ func (s *State) apply(tx Tx) error {
 
 	s.Balances[tx.From] -= tx.Value
 	s.Balances[tx.To] += tx.Value
+
+	return nil
+}
+
+func (s *State) LatestSnapshot() Snapshot {
+	return s.snapshot
+}
+
+func (s *State) doSnapshot() error {
+	_, err := s.dbFile.Seek(0, 0)
+	if err != nil {
+		return err
+	}
+
+	txsDate, err := ioutil.ReadAll(s.dbFile)
+	if err != nil {
+		return err
+	}
+	s.snapshot = sha256.Sum256(txsDate)
 
 	return nil
 }
