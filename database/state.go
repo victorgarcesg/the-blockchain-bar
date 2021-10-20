@@ -35,7 +35,7 @@ func NewStateFromDisk() (*State, error) {
 		balances[account] = balance
 	}
 
-	txDbFilePath := filepath.Join(cwd, "database", "tx.db")
+	txDbFilePath := filepath.Join(cwd, "database", "block.db")
 	f, err := os.OpenFile(txDbFilePath, os.O_APPEND|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
@@ -125,6 +125,26 @@ func (s *State) apply(tx Tx) error {
 
 func (s *State) LatestSnapshot() Hash {
 	return s.latestBlockHash
+}
+
+func (s *State) AddBlock(b Block) error {
+	for _, tx := range b.TXs {
+		if err := s.AddTx(tx); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (s *State) AddTx(tx Tx) error {
+	if err := s.apply(tx); err != nil {
+		return err
+	}
+
+	s.txMempool = append(s.txMempool, tx)
+
+	return nil
 }
 
 func (s *State) doSnapshot() error {
