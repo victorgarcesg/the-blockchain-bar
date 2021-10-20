@@ -8,17 +8,16 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 type State struct {
 	Balances  map[Account]uint
 	txMempool []Tx
 
-	dbFile   *os.File
-	snapshot Snapshot
+	dbFile          *os.File
+	latestBlockHash Hash
 }
-
-type Snapshot [32]byte
 
 func NewStateFromDisk() (*State, error) {
 	cwd, err := os.Getwd()
@@ -43,7 +42,7 @@ func NewStateFromDisk() (*State, error) {
 	}
 
 	scanner := bufio.NewScanner(f)
-	state := &State{balances, make([]Tx, 0), f, Snapshot{}}
+	state := &State{balances, make([]Tx, 0), f, Hash{}}
 
 	for scanner.Scan() {
 		if err := scanner.Err(); err != nil {
@@ -76,32 +75,32 @@ func (s *State) Add(tx Tx) error {
 	return nil
 }
 
-func (s *State) Persist() (Snapshot, error) {
-	mempool := make([]Tx, len(s.txMempool))
-	copy(mempool, s.txMempool)
+func (s *State) Persist() (Hash, error) {
+	block := NewBlock(s.latestBlockHash, uint64(time.Now().Unix()), s.txMempool)
 
-	for i := 0; i < len(mempool); i++ {
-		txJson, err := json.Marshal(mempool[i])
-		if err != nil {
-			return Snapshot{}, err
-		}
-
-		fmt.Println("Persisting new TX to disk:")
-		fmt.Printf("\t%s\n", txJson)
-		if _, err := s.dbFile.Write(append(txJson, '\n')); err != nil {
-			return Snapshot{}, err
-		}
-
-		err = s.doSnapshot()
-		if err != nil {
-			return Snapshot{}, err
-		}
-		fmt.Printf("New DB Snapshot: %x\n", s.snapshot)
-
-		s.txMempool = s.txMempool[1:]
+	blockHash, err := block.Hash()
+	if err != nil {
+		return Hash{}, err
 	}
 
-	return s.snapshot, nil
+	blockFs := BlockFS{blockHash, block}
+	blockFsJson, err := json.Marshal(blockFs)
+	if err != nil {
+		return Hash{}, err
+	}
+
+	fmt.Println("Persisting new block to disk:")
+	fmt.Printf("\t%s\n", blockFsJson)
+
+	_, err = s.dbFile.Write(append(blockFsJson, '\n'))
+	if err != nil {
+		return Hash{}, err
+	}
+
+	s.latestBlockHash = blockHash
+	s.txMempool = []Tx{}
+
+	return s.latestBlockHash, nil
 }
 
 func (s *State) Close() {
@@ -124,8 +123,8 @@ func (s *State) apply(tx Tx) error {
 	return nil
 }
 
-func (s *State) LatestSnapshot() Snapshot {
-	return s.snapshot
+func (s *State) LatestSnapshot() Hash {
+	return s.latestBlockHash
 }
 
 func (s *State) doSnapshot() error {
@@ -138,7 +137,7 @@ func (s *State) doSnapshot() error {
 	if err != nil {
 		return err
 	}
-	s.snapshot = sha256.Sum256(txsDate)
+	s.latestBlockHash = sha256.Sum256(txsDate)
 
 	return nil
 }
