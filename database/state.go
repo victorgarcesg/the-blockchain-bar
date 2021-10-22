@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path/filepath"
 	"time"
 )
 
@@ -19,14 +18,13 @@ type State struct {
 	latestBlockHash Hash
 }
 
-func NewStateFromDisk() (*State, error) {
-	cwd, err := os.Getwd()
+func NewStateFromDisk(dataDir string) (*State, error) {
+	err := initDataDirIfNotExists(dataDir)
 	if err != nil {
 		return nil, err
 	}
 
-	genFilePath := filepath.Join(cwd, "database", "genesis.json")
-	gen, err := loadGenesis(genFilePath)
+	gen, err := loadGenesis(getGenesisJsonFilePath(dataDir))
 	if err != nil {
 		return nil, err
 	}
@@ -35,8 +33,7 @@ func NewStateFromDisk() (*State, error) {
 		balances[account] = balance
 	}
 
-	txDbFilePath := filepath.Join(cwd, "database", "block.db")
-	f, err := os.OpenFile(txDbFilePath, os.O_APPEND|os.O_RDWR, 0600)
+	f, err := os.OpenFile(getBlocksDbFilePath(dataDir), os.O_APPEND|os.O_RDWR, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -49,12 +46,18 @@ func NewStateFromDisk() (*State, error) {
 			return nil, err
 		}
 
-		var tx Tx
-		json.Unmarshal(scanner.Bytes(), &tx)
-
-		if err := state.apply(tx); err != nil {
+		blockFsJson := scanner.Bytes()
+		var blockFs BlockFS
+		err = json.Unmarshal(blockFsJson, &blockFs)
+		if err != nil {
 			return nil, err
 		}
+
+		if err := state.applyBlock(blockFs.Value); err != nil {
+			return nil, err
+		}
+
+		state.latestBlockHash = blockFs.Key
 	}
 
 	err = state.doSnapshot()
@@ -105,6 +108,16 @@ func (s *State) Persist() (Hash, error) {
 
 func (s *State) Close() {
 	s.dbFile.Close()
+}
+
+func (s *State) applyBlock(b Block) error {
+	for _, tx := range b.TXs {
+		if err := s.apply(tx); err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (s *State) apply(tx Tx) error {
